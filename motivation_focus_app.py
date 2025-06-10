@@ -19,6 +19,10 @@ class MotivationFocusApp:
         conn = sqlite3.connect('motivation_analysis.db')
         cursor = conn.cursor()
         
+        # 既存のテーブルを削除
+        cursor.execute('DROP TABLE IF EXISTS user_analyses')
+        
+        # 新しいスキーマでテーブルを作成
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_analyses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,9 +37,7 @@ class MotivationFocusApp:
             success_preference TEXT,
             interest_level INTEGER,
             concerns TEXT,
-            selected_approach TEXT,
-            analysis_reason TEXT,
-            analysis_effect TEXT,
+            dream TEXT,
             motivation_message TEXT,
             action_plan TEXT
         )
@@ -53,9 +55,8 @@ class MotivationFocusApp:
         INSERT INTO user_analyses (
             timestamp, age_group, occupation, english_frequency, past_experience,
             personality_traits, time_availability, stress_factors, success_preference,
-            interest_level, concerns, selected_approach, analysis_reason, analysis_effect,
-            motivation_message, action_plan
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            interest_level, concerns, dream, motivation_message, action_plan
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             datetime.now().isoformat(),
             user_data.get('age_group', ''),
@@ -68,9 +69,7 @@ class MotivationFocusApp:
             user_data.get('success_preference', ''),
             user_data.get('interest_level', 0),
             user_data.get('concerns', ''),
-            user_data.get('approach', ''),
-            user_data.get('analysis_reason', ''),
-            user_data.get('analysis_effect', ''),
+            user_data.get('dream', ''),
             motivation_message or '',
             action_plan or ''
         ))
@@ -80,20 +79,6 @@ class MotivationFocusApp:
         conn.close()
         
         return analysis_id
-    
-    def update_motivation_data(self, analysis_id, motivation_message, action_plan):
-        """モチベーションデータをデータベースに更新保存"""
-        conn = sqlite3.connect('motivation_analysis.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        UPDATE user_analyses
-        SET motivation_message = ?, action_plan = ?
-        WHERE id = ?
-        ''', (motivation_message, action_plan, analysis_id))
-        
-        conn.commit()
-        conn.close()
     
     def get_llm_response(self, messages):
         """LLMからの応答を取得"""
@@ -105,15 +90,24 @@ class MotivationFocusApp:
             )
             return response.choices[0].message.content
         except Exception as e:
-            return f"エラーが発生しました: {str(e)}"
+            st.error(f"エラーが発生しました: {str(e)}")
+            return None
     
-    def analyze_optimal_approach(self, user_data):
-        """ユーザーデータを分析して最適なアプローチを決定"""
+    def generate_personalized_motivation(self, user_data, approach_type):
+        print(user_data)
+        """個人化されたモチベーション向上メッセージ生成"""
         prompt = f"""
         回答はすべて日本語で行ってください。
-        以下のユーザー情報を分析して、英語学習の動機づけに最も効果的なアプローチを1つ選択してください。
-        また、このメッセージはユーザーに直接表示されるものなので、メタ的な文章は避けてください。
+        以下のユーザーにゴールから逆算する形で、英語学習に前向きになれるようなメッセージングを心理学の視点に基づいてしてください。
+        提供された情報を安直に使わず、ユーザーがどんな思考を持つタイプか、人となりを考えてメッセージングをしてください。
+        基本的にユーザーは英語学習に興味がないものだと思ってください。「なぜ」英語学習が必要なのか。「どうして」英語学習を始めるのか。そこを考えてメッセージングをしてください。
+        一番重要なことは、この人がメッセージングに触発されて、「英語学習を始めたい」という思いを持ってくれることです。
+        学術的で冷静なトーンを保ち、過度な煽りは避けてください。
 
+        また、このメッセージはユーザーに直接表示されるものなので、メタ的な文章は避けてください。
+        直接メッセージをください。
+        メッセージはできるだけ長くしてください。
+        
         ユーザー情報:
         - 年齢層: {user_data.get('age_group')}
         - 職業: {user_data.get('occupation')}
@@ -122,97 +116,10 @@ class MotivationFocusApp:
         - 性格傾向: {user_data.get('personality_traits')}
         - 時間的余裕: {user_data.get('time_availability')}
         - ストレス要因: {user_data.get('stress_factors')}
-        - 成功体験の好み: {user_data.get('success_preference')}
         - 現在の関心度: {user_data.get('interest_level')}/10
         - 悩み: {user_data.get('concerns')}
         - 将来の夢: {user_data.get('dream')}
-
-        選択肢:
-        1. loss_aversion（損失回避）: 現状維持のリスクに焦点を当てる
-        2. social_proof（社会的証明）: 他者の行動や成功例を参考にする
-        3. implementation_intention（実装意図）: 具体的な行動計画の策定
-
-        以下の形式で回答してください：
-        選択したアプローチ: [loss_aversion/social_proof/implementation_intention]
-        
-        選択理由:
-        [このユーザーの特徴や状況を分析し、なぜこのアプローチが最も効果的かを詳しく説明]
-        
-        期待される効果:
-        [このアプローチによってユーザーにどのような変化が期待できるか]
         """
-        
-        return self.get_llm_response([{"role": "user", "content": prompt}])
-    
-    def generate_personalized_motivation(self, user_data, approach_type):
-        """個人化されたモチベーション向上メッセージ生成"""
-        
-        if approach_type == "loss_aversion":
-            prompt = f"""
-            回答はすべて日本語で行ってください。
-            行動経済学の「損失回避（現状維持のリスクに焦点を当てる）」の原理を使って、以下のユーザーに ゴールから逆算する形で、英語学習に前向きになれるようなメッセージングをしてください。
-            基本的にユーザーは英語学習に興味がないものだと思ってください。
-            一番重要なことは、この人が「英語学習を始めたい」という思いを持ってくれることです。
-            学術的で冷静なトーンを保ち、過度な煽りは避けてください。
-            また、このメッセージはユーザーに直接表示されるものなので、メタ的な文章は避けてください。
-            
-            ユーザー情報:
-            - 年齢層: {user_data.get('age_group')}
-            - 職業: {user_data.get('occupation')}
-            - 英語使用頻度: {user_data.get('english_frequency')}
-            - 過去の学習経験: {user_data.get('past_experience')}
-            - 性格傾向: {user_data.get('personality_traits')}
-            - 時間的余裕: {user_data.get('time_availability')}
-            - ストレス要因: {user_data.get('stress_factors')}
-            - 現在の関心度: {user_data.get('interest_level')}/10
-            - 悩み: {user_data.get('concerns')}
-            - 将来の夢: {user_data.get('dream')}
-            """
-        
-        elif approach_type == "social_proof":
-            prompt = f"""
-            回答はすべて日本語で行ってください。
-            社会的証明（他者の行動や成功例を参考にする）の原理を使って、以下のユーザーにゴールから逆算する形で、英語学習に前向きになれるようなメッセージングをしてください。
-            基本的にユーザーは英語学習に興味がないものだと思ってください。
-            一番重要なことは、この人が「英語学習を始めたい」という思いを持ってくれることです。
-            研究的な視点で、事実に基づいた内容にしてください。
-            また、このメッセージはユーザーに直接表示されるものなので、メタ的な文章は避けてください。
-            
-            ユーザー情報:
-            - 年齢層: {user_data.get('age_group')}
-            - 職業: {user_data.get('occupation')}
-            - 英語使用頻度: {user_data.get('english_frequency')}
-            - 過去の学習経験: {user_data.get('past_experience')}
-            - 性格傾向: {user_data.get('personality_traits')}
-            - 時間的余裕: {user_data.get('time_availability')}
-            - ストレス要因: {user_data.get('stress_factors')}
-            - 現在の関心度: {user_data.get('interest_level')}/10
-            - 悩み: {user_data.get('concerns')}
-            - 将来の夢: {user_data.get('dream')}
-            """
-        
-        elif approach_type == "implementation_intention":
-            prompt = f"""
-            回答はすべて日本語で行ってください。
-            実装意図（具体的な行動計画の策定）の理論を使って、 ゴールから逆算する形で、英語学習に前向きになれるようなメッセージングをしてください。
-            基本的にユーザーは英語学習に興味がないものだと思ってください。
-            一番重要なことは、この人が「英語学習を始めたい」という思いを持ってくれることです。
-            ゴールから逆算する形で、英語学習に前向きになれるような具体的なメッセージングをしてください。
-            また、このメッセージはユーザーに直接表示されるものなので、メタ的な文章は避けてください。
-
-            ユーザー情報:
-            - 年齢層: {user_data.get('age_group')}
-            - 職業: {user_data.get('occupation')}
-            - 英語使用頻度: {user_data.get('english_frequency')}
-            - 過去の学習経験: {user_data.get('past_experience')}
-            - 性格傾向: {user_data.get('personality_traits')}
-            - 時間的余裕: {user_data.get('time_availability')}
-            - ストレス要因: {user_data.get('stress_factors')}
-            - 現在の関心度: {user_data.get('interest_level')}/10
-            - 悩み: {user_data.get('concerns')}
-            - 将来の夢: {user_data.get('dream')}
-
-            """
         
         return self.get_llm_response([{"role": "user", "content": prompt}])
     
@@ -487,45 +394,9 @@ def show_assessment_page():
             'concerns': ', '.join(st.session_state.get('temp_concerns', [])),
             'dream': st.session_state.get('temp_dream', '詳細未入力')
         }
-        print(user_data)
         
         # AIでバックグラウンド分析を実行
         app = MotivationFocusApp()
-        
-        with st.spinner("AI分析中... あなたに最適なアプローチを判定しています"):
-            analysis_result = app.analyze_optimal_approach(user_data)
-        
-        # 分析結果を解析
-        lines = analysis_result.split('\n')
-        selected_approach = None
-        reason = ""
-        expected_effect = ""
-        
-        current_section = None
-        for line in lines:
-            line = line.strip()
-            if '選択したアプローチ:' in line:
-                for approach in ['loss_aversion', 'social_proof', 'implementation_intention']:
-                    if approach in line:
-                        selected_approach = approach
-                        break
-            elif '選択理由:' in line:
-                current_section = "reason"
-            elif '期待される効果:' in line:
-                current_section = "effect"
-            elif line and current_section == "reason":
-                reason += line + "\n"
-            elif line and current_section == "effect":
-                expected_effect += line + "\n"
-        
-        # デフォルト値設定
-        if not selected_approach:
-            selected_approach = "loss_aversion"
-        
-        # 分析結果をuser_dataに追加
-        user_data['approach'] = selected_approach
-        user_data['analysis_reason'] = reason.strip()
-        user_data['analysis_effect'] = expected_effect.strip()
         
         # データベースに分析結果を保存
         analysis_id = app.save_analysis_to_database(user_data)
@@ -541,22 +412,13 @@ def show_motivation_page():
     user_data = st.session_state.get('user_data', {})
     app = MotivationFocusApp()
     
-    approach_names = {
-        "loss_aversion": "🎯 損失回避アプローチ",
-        "social_proof": "👥 社会的証明アプローチ", 
-        "implementation_intention": "📋 実装意図アプローチ"
-    }
-    
-    selected_approach = user_data.get('approach', 'loss_aversion')
-    
     st.markdown(f"""
     # 英語学習を始めてみませんか？
-  
     """)
     
     # パーソナライズされたモチベーションメッセージ
     with st.spinner("最適化中..."):
-        motivation_message = app.generate_personalized_motivation(user_data, selected_approach)
+        motivation_message = app.generate_personalized_motivation(user_data, "loss_aversion")
     
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 25px; border-radius: 15px; margin: 20px 0;">
@@ -576,7 +438,7 @@ def show_motivation_page():
     
     # データベースにモチベーションメッセージとアクションプランを更新保存
     if 'analysis_id' in user_data:
-        app.update_motivation_data(user_data['analysis_id'], motivation_message, next_steps)
+        app.save_analysis_to_database(user_data, motivation_message, next_steps)
     
     st.markdown(f"""
     <div style="background: #2ecc71; color: white; padding: 25px; border-radius: 15px; margin: 20px 0;">
@@ -586,24 +448,6 @@ def show_motivation_page():
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # 他のアプローチも試してみる
-    st.markdown("---")
-    st.subheader("🔄他のアプローチも試してみる")
-    st.markdown("*AIの分析結果とは異なりますが、他のアプローチでのメッセージも確認できます*")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    approaches = ["loss_aversion", "social_proof", "implementation_intention"]
-    approach_labels = ["損失回避", "社会的証明", "実装意図"]
-    
-    for i, (approach, label) in enumerate(zip(approaches, approach_labels)):
-        with [col1, col2, col3][i]:
-            if approach != selected_approach:
-                if st.button(f"🔄 {label}で再生成", key=f"retry_{approach}"):
-                    user_data['approach'] = approach
-                    st.session_state.user_data = user_data
-                    st.rerun()
     
     # リスタート
     st.markdown("---")
@@ -640,6 +484,12 @@ def main():
             st.markdown(f"• 学習経験: {user_data.get('past_experience', '未設定')}")
             st.markdown(f"• 時間的余裕: {user_data.get('time_availability', '未設定')}")
             st.markdown(f"• 関心度: {user_data.get('interest_level', '未設定')}/10")
+            st.markdown(f"• 将来の夢: {user_data.get('dream', '未設定')}")
+            st.markdown(f"• 性格傾向: {user_data.get('personality_traits', '未設定')}")
+            st.markdown(f"• ストレス要因: {user_data.get('stress_factors', '未設定')}")
+            st.markdown(f"• 成功体験: {user_data.get('success_preference', '未設定')}")
+            st.markdown(f"• 悩み: {user_data.get('concerns', '未設定')}")
+
 
 if __name__ == "__main__":
     main() 
